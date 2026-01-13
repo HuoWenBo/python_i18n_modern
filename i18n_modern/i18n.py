@@ -14,19 +14,13 @@ from typing import cast
 from i18n_modern.helpers import eval_key, format_value, get_deep_value, merge_deep
 from i18n_modern.types import FormatParam, LocaleDict, Locales, LocaleValue
 
-yaml_available = False
 try:
     import yaml
-
-    yaml_available = True
 except ImportError:
     yaml = None
 
-toml_available = False
 try:
     import tomli
-
-    toml_available = True
 except ImportError:
     tomli = None
 
@@ -40,18 +34,23 @@ class I18nModern:
         locales: The locales variable (dict) or path to locale file
     """
 
-    def __init__(self, default_locale: str, locales: LocaleDict | str | None = None):
+    def __init__(
+            self,
+            default_locale: str,
+            locales: LocaleDict | str | None = None,
+            *,
+            cache_max_size: int = 2048
+    ):
         self._locales: Locales = {}
         self._default_locale: str = default_locale
         # Increased cache size for better performance (was unbounded)
         self._previous_translations: dict[tuple[object, ...], str] = {}
-        self._cache_max_size: int = 2048  # Limit cache size to prevent unbounded growth
+        self._cache_max_size: int = cache_max_size  # Limit cache size to prevent unbounded growth
 
-        if locales:
-            if isinstance(locales, str):
-                self.load_from_file(locales, default_locale)
-            else:
-                self.load_from_value(locales, default_locale)
+        if isinstance(locales, str):
+            self.load_from_file(locales, default_locale)
+        elif isinstance(locales, dict):
+            self.load_from_value(locales, default_locale)
 
     @property
     def default_locale(self) -> str:
@@ -90,19 +89,33 @@ class I18nModern:
                 with open(path, "r", encoding="utf-8") as f:
                     data = cast(LocaleDict, json.load(f))
         elif suffix in [".yaml", ".yml"]:
-            if not yaml_available or yaml is None:
+            if yaml is None:
                 raise ImportError("PyYAML is required for YAML support. Install with: pip install pyyaml")
             with open(path, "r", encoding="utf-8") as f:
                 data = cast(LocaleDict, yaml.safe_load(f))  # type: ignore
         elif suffix == ".toml":
-            if not toml_available or tomli is None:
+            if tomli is None:
                 raise ImportError("tomli is required for TOML support. Install with: pip install tomli")
             with open(path, "rb") as f:
                 data = cast(LocaleDict, tomli.load(f))  # type: ignore
         else:
             raise ValueError(f"Unsupported file format: {suffix}. Supported formats: .json, .yaml, .yml, .toml")
 
-        self._locales[locale_identify] = merge_deep(self._locales.get(self._default_locale), data)
+        self._update_locales(locale_identify, data)
+
+    def _update_locales(self, identify: str, data: LocaleDict):
+        self._locales[identify] = merge_deep(
+            self._locales.get(
+                identify,
+                self._locales.get(self._default_locale)
+            ),
+            data
+        )
+        # Clear the corresponding translation cache to apply the new translated text
+        for key, locale, values_tuple in list(self._previous_translations.keys()):
+            if locale == identify:
+                del self._previous_translations[(key, locale, values_tuple)]
+
 
     def _load_path(self, path: Path) -> LocaleDict:
         """Load a single locale file from a path with mmap optimization for JSON."""
@@ -118,12 +131,12 @@ class I18nModern:
                 with open(path, "r", encoding="utf-8") as f:
                     return cast(LocaleDict, json.load(f))
         if suffix in [".yaml", ".yml"]:
-            if not yaml_available or yaml is None:
+            if yaml is None:
                 raise ImportError("PyYAML is required for YAML support. Install with: pip install pyyaml")
             with open(path, "r", encoding="utf-8") as f:
                 return cast(LocaleDict, yaml.safe_load(f))  # type: ignore
         if suffix == ".toml":
-            if not toml_available or tomli is None:
+            if tomli is None:
                 raise ImportError("tomli is required for TOML support. Install with: pip install tomli")
             with open(path, "rb") as f:
                 return cast(LocaleDict, tomli.load(f))  # type: ignore
@@ -152,7 +165,8 @@ class I18nModern:
 
         # Merge results into _locales
         for locale, data in results:
-            self._locales[locale] = merge_deep(self._locales.get(self._default_locale), data)
+            self._update_locales(locale, data)
+            # self._locales[locale] = merge_deep(self._locales.get(self._default_locale), data)
 
     def load_from_value(self, locales: LocaleDict, locale_identify: str):
         """
@@ -162,7 +176,9 @@ class I18nModern:
             locales: The locales dictionary
             locale_identify: Locale identifier
         """
-        self._locales[locale_identify] = merge_deep(self._locales.get(self._default_locale), locales)
+        # self._locales[locale_identify] = merge_deep(self._locales.get(self._default_locale), locales)
+
+        self._update_locales(locale_identify, locales)
 
     def get(self, key: str, locale: str | None = None, values: FormatParam | None = None) -> str:
         """
@@ -196,8 +212,9 @@ class I18nModern:
 
             # Bounded cache - prevent unbounded growth
             if len(self._previous_translations) >= self._cache_max_size:
-                # Simple FIFO eviction: remove oldest items (first half)
-                keys_to_remove = list(self._previous_translations.keys())[: self._cache_max_size // 4]
+                # Simple FIFO eviction: remove the oldest items (first half)
+                limit = self._cache_max_size // 4 if self._cache_max_size > 4 else 1
+                keys_to_remove = list(self._previous_translations.keys())[: limit]
                 for k in keys_to_remove:
                     del self._previous_translations[k]
 
@@ -209,7 +226,7 @@ class I18nModern:
             return key
 
     def _get_translation(
-        self, translation: LocaleValue, values: FormatParam | None = None, default_translation: str | None = None
+            self, translation: LocaleValue, values: FormatParam | None = None, default_translation: str | None = None
     ) -> str:
         """
         Get a translation from object and format it.

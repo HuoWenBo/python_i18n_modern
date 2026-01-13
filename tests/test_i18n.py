@@ -166,3 +166,32 @@ def test_multiple_locale_setting() -> None:
 
     i18n.default_locale = "de"
     assert i18n.default_locale == "de"
+
+
+def test_multiple_loads_merge_locale() -> None:
+    """
+    Testing that reloading won't let the default translation text
+    override translations that have already been loaded
+    """
+    i18n = I18nModern("en", {
+        "title": "Test",
+        "message": "Hello World!"
+    })
+
+    assert i18n.get("title") == "Test"
+    assert i18n.get("message") == "Hello World!"
+
+    i18n.load_from_value({
+        "message": "你好, 世界"
+    }, "zh")
+
+    assert i18n.get("title", "zh") == "Test"
+    assert i18n.get("message", "zh") == "你好, 世界"
+
+    i18n.load_from_value({
+        "title": "测试",
+    }, "zh")
+
+    assert i18n.get("title", "zh") == "测试"
+    assert i18n.get("message", "zh") == "你好, 世界"
+

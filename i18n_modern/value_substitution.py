@@ -12,7 +12,7 @@ if TYPE_CHECKING:
     from .types import FormatParam
 
 # Precompiled regex pattern for performance
-_PLACEHOLDER_PATTERN: re.Pattern[str] = re.compile(r"\[(.*?)\]")
+_PLACEHOLDER_PATTERN: re.Pattern[str] = re.compile(r"\[(.*?)]")
 
 
 class ValueSubstitutor:

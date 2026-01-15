@@ -3,7 +3,6 @@ Module to get translation from locales.
 
 Author: Uriel Curiel <urielcurrel@outlook.com>
 """
-
 import json
 import logging
 from collections.abc import Iterable
@@ -12,7 +11,7 @@ from pathlib import Path
 from typing import cast
 
 from i18n_modern.helpers import eval_key, format_value, get_deep_value, merge_deep
-from i18n_modern.types import FormatParam, LocaleDict, Locales, LocaleValue
+from i18n_modern.types import FormatParam, LocaleDict, Locales, LocaleValue, CacheDict
 
 try:
     import yaml
@@ -34,21 +33,31 @@ class I18nModern:
         locales: The locales variable (dict) or path to locale file
     """
 
+    __slots__ = (
+        "_locales",
+        "_default_locale",
+        "_previous_translations",
+        "_cache_max_size",
+    )
+
     def __init__(
             self,
             default_locale: str,
-            locales: LocaleDict | str | None = None,
+            locales: LocaleDict | str | Path | None = None,
             *,
             cache_max_size: int = 2048
     ):
         self._locales: Locales = {}
         self._default_locale: str = default_locale
         # Increased cache size for better performance (was unbounded)
-        self._previous_translations: dict[tuple[object, ...], str] = {}
+        self._previous_translations: CacheDict = {}
         self._cache_max_size: int = cache_max_size  # Limit cache size to prevent unbounded growth
 
-        if isinstance(locales, str):
-            self.load_from_file(locales, default_locale)
+        if cache_max_size <= 0:
+            raise ValueError("cache_max_size must be a positive integer")
+
+        if isinstance(locales, str | Path):
+            self.load_from_file(Path(locales), default_locale)
         elif isinstance(locales, dict):
             self.load_from_value(locales, default_locale)
 
@@ -62,7 +71,7 @@ class I18nModern:
         """Set the default locale."""
         self._default_locale = value
 
-    def load_from_file(self, file_path: str, locale_identify: str):
+    def load_from_file(self, file_path: str | Path, locale_identify: str):
         """
         Load locales from a file (JSON, YAML, or TOML).
 
@@ -103,19 +112,18 @@ class I18nModern:
 
         self._update_locales(locale_identify, data)
 
-    def _update_locales(self, identify: str, data: LocaleDict):
-        self._locales[identify] = merge_deep(
+    def _update_locales(self, locale_identify: str, data: LocaleDict):
+        self._locales[locale_identify] = merge_deep(
             self._locales.get(
-                identify,
+                locale_identify,
                 self._locales.get(self._default_locale)
             ),
             data
         )
         # Clear the corresponding translation cache to apply the new translated text
         for key, locale, values_tuple in list(self._previous_translations.keys()):
-            if locale == identify:
+            if locale == locale_identify:
                 del self._previous_translations[(key, locale, values_tuple)]
-
 
     def _load_path(self, path: Path) -> LocaleDict:
         """Load a single locale file from a path with mmap optimization for JSON."""
@@ -142,7 +150,7 @@ class I18nModern:
                 return cast(LocaleDict, tomli.load(f))  # type: ignore
         raise ValueError(f"Unsupported file format: {suffix}. Supported formats: .json, .yaml, .yml, .toml")
 
-    def _task_load_locale(self, file_path: str, locale: str) -> tuple[str, LocaleDict]:
+    def _task_load_locale(self, file_path: str | Path, locale: str) -> tuple[str, LocaleDict]:
         path = Path(file_path)
         if not path.exists():
             raise FileNotFoundError(f"Locale file not found: {file_path}")
@@ -194,7 +202,9 @@ class I18nModern:
         """
         try:
             locale = locale or self._default_locale
-            values_tuple = tuple(sorted(values.items())) if values else None
+            # values_tuple = tuple(sorted(values.items())) if values else None
+            # values_tuple = frozenset(values.items()) if values else None
+            values_tuple = tuple(values.items()) if values else None
             cache_key = (key, locale, values_tuple)
 
             if cache_key in self._previous_translations:
@@ -254,7 +264,31 @@ class I18nModern:
 
             # Return default if no key matches
             if default_translation:
-                return self._get_translation(default_translation, values, default_translation)  # type: ignore
+                # return self._get_translation(default_translation, values, default_translation)  # type: ignore
+                return format_value(default_translation, values)  # type: ignore
             return ""
 
         return format_value(translation, values)
+
+
+class _LazyLoader:
+    def __init__(
+            self,
+            i18n: I18nModern,
+            key: str,
+            default_locale: str | None = None,
+    ):
+        self.i18n = i18n
+        self.key = key
+        self.default_locale = default_locale
+
+    def __get__(self, instance, owner) -> str:
+        return self.i18n.get(self.key, self.default_locale)
+
+
+class LazyLoader:
+    def __init__(self, i18n: I18nModern):
+        self.i18n = i18n
+
+    def __call__(self, key: str, locale: str) -> _LazyLoader:
+        return _LazyLoader(self.i18n, key, locale)

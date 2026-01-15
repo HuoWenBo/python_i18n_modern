@@ -26,6 +26,8 @@ _SAFE_EXPRESSION_PATTERN: re.Pattern[str] = re.compile(
 class ConditionalKeyEvaluator:
     """Evaluator for conditional translation keys."""
 
+    __slots__ = ()
+
     # Python reserved words that should not appear in expressions
     _RESERVED_WORDS: frozenset[str] = frozenset(
         [

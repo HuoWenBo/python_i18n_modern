@@ -60,15 +60,15 @@ class BenchmarkRunner:
         import sys
 
         start = time.perf_counter()
-        if suppress_output:
-            old_stdout = sys.stdout
-            sys.stdout = io.StringIO()
+        # if suppress_output:
+        old_stdout = sys.stdout
+        sys.stdout = io.StringIO()
         try:
             for _ in range(iterations):
                 func()
         finally:
-            if suppress_output:
-                sys.stdout = old_stdout
+            # if suppress_output:
+            sys.stdout = old_stdout
         end = time.perf_counter()
         total_time = end - start
         return total_time, total_time / iterations
@@ -88,7 +88,7 @@ class BenchmarkRunner:
         py_i18n.set("locale", "en")
         py_i18n.set("filename_format", "{namespace}.{locale}.json")
         py_i18n.set("file_format", "json")
-        py_i18n.set("default_locale", "en")
+        # py_i18n.set("default_locale", "en")
 
         # Load from file
         locale_dir = Path(__file__).parent / "examples" / "locales"
@@ -514,7 +514,7 @@ class BenchmarkRunner:
         self.print_comparison_summary()
 
         print("\n" + "█" * 70)
-        print("█ BENCHMARK COMPLETE".ljust(70) + "█")
+        print("█ BENCHMARK COMPLETE".ljust(69) + "█")
         print("█" * 70 + "\n")
 
 

@@ -8,29 +8,28 @@ from __future__ import annotations
 
 import ast
 import functools
-from typing import Callable
+import operator as op
+from typing import Callable, TypeVar, Type
 
 from .types import FormatValue
 
-# Mapping of AST comparison operators to their implementations
-_STRING_COMPARATORS: dict[type[ast.cmpop], Callable[[str, str], bool]] = {
-    ast.Gt: lambda a, b: a > b,
-    ast.GtE: lambda a, b: a >= b,
-    ast.Lt: lambda a, b: a < b,
-    ast.LtE: lambda a, b: a <= b,
-    ast.Eq: lambda a, b: a == b,
-    ast.NotEq: lambda a, b: a != b,
-}
 
-_NUMERIC_COMPARATORS: dict[type[ast.cmpop], Callable[[float, float], bool]] = {
-    ast.Gt: lambda a, b: a > b,
-    ast.GtE: lambda a, b: a >= b,
-    ast.Lt: lambda a, b: a < b,
-    ast.LtE: lambda a, b: a <= b,
-    ast.Eq: lambda a, b: a == b,
-    ast.NotEq: lambda a, b: a != b,
-}
+_T = TypeVar('_T')
 
+def _get_operator(op_type: Type[ast.cmpop]) -> Callable[[_T, _T], bool]:
+    if op_type is ast.Gt:
+        return op.gt
+    if op_type is ast.GtE:
+        return op.ge
+    if op_type is ast.Lt:
+        return op.lt
+    if op_type is ast.LtE:
+        return op.le
+    if op_type is ast.Eq:
+        return op.eq
+    if op_type is ast.NotEq:
+        return op.ne
+    raise ValueError('unknown operator type')
 
 class ASTExpressionEvaluator:
     """Evaluator for safe boolean expressions using Python AST."""
@@ -204,17 +203,14 @@ class ASTExpressionEvaluator:
             ValueError: If types are incompatible for ordering
         """
         op_type = type(operator)
+        comparator = _get_operator(op_type)
 
         # String comparison
         if isinstance(left, str) and isinstance(right, str):
-            comparator = _STRING_COMPARATORS.get(op_type)
-            if comparator:
-                return comparator(left, right)
+            return comparator(left, right)
 
         # Numeric comparison
         if isinstance(left, (int, float, bool)) and isinstance(right, (int, float, bool)):
-            comparator = _NUMERIC_COMPARATORS.get(op_type)
-            if comparator:
-                return comparator(float(left), float(right))
+            return comparator(float(left), float(right))
 
         raise ValueError(f"Cannot compare {type(left)} with {type(right)}")

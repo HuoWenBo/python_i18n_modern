@@ -9,11 +9,9 @@ Optimizations added:
 
 from __future__ import annotations
 
-from collections import deque
 from collections.abc import Mapping
 from typing import cast
 
-from ._accel import format_value_fast, get_deep_value_fast
 from .conditional_evaluator import ConditionalKeyEvaluator
 from .types import FormatParam, LocaleDict, LocaleValue
 from .value_substitution import ValueSubstitutor
@@ -21,6 +19,8 @@ from .value_substitution import ValueSubstitutor
 
 class TreePathVisitor:
     """Visitor for traversing nested mapping structures using path segments."""
+
+    __slots__ = ("segments", "segment_index")
 
     segments: list[str]
     segment_index: int
@@ -32,11 +32,6 @@ class TreePathVisitor:
         Args:
             segments: Path segments to traverse (e.g., ["user", "profile", "name"])
         """
-        self.segments = segments
-        self.segment_index = 0
-
-    def reset(self, segments: list[str]) -> None:
-        """Reset the visitor to reuse the same instance from a pool."""
         self.segments = segments
         self.segment_index = 0
 
@@ -66,38 +61,6 @@ class TreePathVisitor:
         return self.visit(next_node)
 
 
-class _TreePathVisitorPool:
-    """Optimized pool for TreePathVisitor instances with pre-allocated instances.
-
-    This pool is intentionally simple (LIFO) and not thread-safe. Each thread
-    using get_deep_value should maintain its own instances through the GIL.
-    """
-
-    def __init__(self, maxsize: int = 128, prealloc: int = 32) -> None:
-        self._pool: deque[TreePathVisitor] = deque()
-        self._max: int = maxsize
-        # Pre-allocate a set of visitors
-        for _ in range(prealloc):
-            self._pool.append(TreePathVisitor([]))
-
-    def acquire(self, segments: list[str]) -> TreePathVisitor:
-        try:
-            visitor = self._pool.pop()
-            visitor.reset(segments)
-            return visitor
-        except IndexError:
-            return TreePathVisitor(segments)
-
-    def release(self, visitor: TreePathVisitor) -> None:
-        # Avoid holding onto large segment lists
-        visitor.reset([])
-        if len(self._pool) < self._max:
-            self._pool.append(visitor)
-
-
-_VISITOR_POOL = _TreePathVisitorPool()
-
-
 def get_deep_value(obj: LocaleValue | None, path: str) -> LocaleValue | None:
     """
     Get value from deep object using dot notation.
@@ -112,18 +75,7 @@ def get_deep_value(obj: LocaleValue | None, path: str) -> LocaleValue | None:
     if not path:
         return None
 
-    # Try accelerated path first (no-op if not available)
-    if isinstance(obj, Mapping):
-        ok, result = get_deep_value_fast(cast(Mapping[str, object] | None, obj), path)
-        if ok:
-            return cast(LocaleValue | None, result)
-
-    segments: list[str] = path.split(".")
-    visitor = _VISITOR_POOL.acquire(segments)
-    try:
-        return visitor.visit(obj)
-    finally:
-        _VISITOR_POOL.release(visitor)
+    return TreePathVisitor(path.split(".")).visit(obj)
 
 
 def _get_from_segments(current: LocaleValue | None, segments: list[str]) -> LocaleValue | None:
@@ -169,11 +121,6 @@ def format_value(string: str, values: FormatParam | None = None) -> str:
     """
     if values is None or not values:
         return string
-
-    # Accelerated fast path if available
-    ok, s = format_value_fast(string, values)
-    if ok:
-        return s
 
     return ValueSubstitutor.substitute(string, values)
 
